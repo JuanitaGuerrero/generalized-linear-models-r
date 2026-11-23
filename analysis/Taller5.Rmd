@@ -1,0 +1,477 @@
+---
+title: ""
+author: ""
+date: ""
+
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    latex_engine: xelatex
+
+header-includes:
+  - \usepackage{geometry}
+  - \geometry{margin=2.5cm}
+---
+
+\begin{center}
+
+\vspace{1cm}
+
+{\Huge \textbf{Taller 5}}
+
+\vspace{0.3cm}
+
+{\Large Biología Cuantitativa}
+
+\vspace{1cm}
+
+\end{center}
+
+\noindent
+\textbf{Grupo 6:} Juanita Guerrero \& María José Camacho
+\hfill
+`r {
+  meses <- c('enero','febrero','marzo','abril','mayo','junio',
+             'julio','agosto','septiembre','octubre','noviembre','diciembre')
+  hoy <- Sys.Date()
+  paste(as.numeric(format(hoy, '%d')),
+        'de',
+        meses[as.numeric(format(hoy, '%m'))],
+        'de',
+        format(hoy, '%Y'))
+}`
+
+\vspace{-1.5em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+\begingroup
+\renewcommand{\contentsname}{}
+\tableofcontents
+\endgroup
+
+\newpage
+
+# Sección 1 - Elección del Medio de Transporte Universitario
+
+\vspace{-2em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+## a) Hipótesis
+
+La elección del medio de transporte puede estar relacionada con características individuales y con la distancia que debe recorrer cada estudiante para llegar a la universidad.
+
+**$H_0$:** La distancia, la edad y el sexo no están relacionados con la probabilidad de utilizar vehículo particular como medio principal de transporte.
+
+**$H_1$:** Al menos una de estas variables está relacionada con la probabilidad de utilizar vehículo particular como medio principal de transporte.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+No es adecuado utilizar una regresión lineal ordinaria porque la variable respuesta es binaria y solo puede tomar los valores 0 y 1. Una regresión lineal podría producir valores predichos menores que 0 o mayores que 1, que no tendrían sentido como probabilidades.
+
+## b) Modelo
+
+```{r, warning=FALSE, message=FALSE}
+library(readxl)
+
+transporte = read_excel("data/datos.xlsx", sheet = "Ejercicio_1", skip = 2)
+
+# Revisar datos
+head(transporte)
+str(transporte)
+```
+
+```{r, warning=FALSE, message=FALSE}
+modelo_transporte = glm(
+  medio_transporte ~ distancia_km + edad + sexo, data = transporte, 
+  family = binomial(link = "logit")
+)
+
+summary(modelo_transporte)
+```
+
+**Modelo estimado:**
+$$
+\widehat{\text{logit}(p)} =
+-1.023
+- 0.0256(\text{distancia\_km})
+- 0.0141(\text{edad})
++ 0.737(\text{sexoM})
+$$
+
+## c) Supuestos
+
+**Linealidad con el logit**
+
+**$H_0$:** La distancia y la edad presentan una relación lineal con el logit de la probabilidad de utilizar vehículo particular.
+
+**$H_1$:** Al menos una de las variables continuas no presenta una relación lineal con el logit.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+```{r, warning=FALSE, message=FALSE}
+# Términos para evaluar la linealidad con el logit
+transporte$dist_log = transporte$distancia_km * log(transporte$distancia_km)
+transporte$edad_log = transporte$edad * log(transporte$edad)
+
+modelo_linealidad = glm(
+  medio_transporte ~ distancia_km + edad + sexo + dist_log + edad_log, data = transporte, 
+  family = binomial(link = "logit")
+)
+
+summary(modelo_linealidad)
+```
+
+No se encontró evidencia estadísticamente significativa de una relación no lineal con el logit para distancia_km ($p = 0.453$) ni para edad ($p = 0.959$). Por lo tanto, no se rechaza $H_0$ y se cumple el supuesto.
+
+**Multicolinealidad**
+
+```{r, warning=FALSE, message=FALSE}
+library(car)
+
+vif(modelo_transporte)
+```
+
+Los valores de VIF fueron cercanos a 1 y menores a 5 para todas las variables predictoras, por lo que no se observa multicolinealidad problemática entre ellas.
+
+**Sobredispersión**
+
+```{r, warning=FALSE, message=FALSE}
+modelo_transporte$deviance / modelo_transporte$df.residual
+```
+
+La razón entre la deviance residual y sus grados de libertad fue aproximadamente 1.14. Como el valor es cercano a 1 y menor a 1.5, no se observa evidencia de sobredispersión.
+
+**Bondad de ajuste**
+
+**$H_0$:** El modelo presenta un ajuste adecuado a los datos.
+
+**$H_1$:** El modelo no presenta un ajuste adecuado a los datos.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+```{r, warning=FALSE, message=FALSE}
+library(ResourceSelection)
+
+hoslem.test(
+  model.response(model.frame(modelo_transporte)), fitted(modelo_transporte),
+  g = 10
+)
+```
+
+No se encontró evidencia estadísticamente significativa de falta de ajuste del modelo ($p = 0.788$). Por lo tanto, no se rechaza $H_0$ y el modelo presenta un ajuste adecuado a los datos.
+
+\vspace{1cm}
+
+**Distancia de Cook**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+cook = cooks.distance(modelo_transporte)
+limite_cook = 4 / nrow(transporte)
+
+plot(cook, type = "h", main = "Distancia de Cook", ylab = "Distancia de Cook"
+)
+
+abline(h = limite_cook, col = "red", lty = 2)
+
+# Observaciones por encima del punto de corte
+which(cook > limite_cook)
+```
+
+Las observaciones 3 y 25 superan el punto de corte de la distancia de Cook, por lo que pueden tener una influencia importante sobre el ajuste del modelo. La observación 25 presenta especialmente una distancia de Cook elevada.
+
+**Leverage**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+leverage = hatvalues(modelo_transporte)
+limite_leverage = 2 * length(coef(modelo_transporte)) / nrow(transporte)
+
+plot(
+  leverage, type = "h", main = "Valores de leverage", ylab = "Leverage"
+)
+
+abline(h = limite_leverage, col = "blue", lty = 2)
+
+# Observaciones por encima del punto de corte
+which(leverage > limite_leverage)
+```
+
+Las observaciones 6 y 17 presentan valores de leverage superiores al punto de corte, por lo que tienen valores relativamente extremos en las variables predictoras
+
+**Residuos de deviance estandarizados**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+residuos_dev = rstandard(
+  modelo_transporte, type = "deviance"
+)
+
+plot(
+  residuos_dev, main = "Residuos de deviance estandarizados", ylab = "Residuos estandarizados"
+)
+
+abline(h = c(-2, 2), col = "red", lty = 2)
+
+# Observaciones fuera del intervalo [-2, 2]
+which(abs(residuos_dev) > 2)
+```
+
+La observación 25 presenta un residuo de deviance estandarizado superior a 2, por lo que se identifica como una observación potencialmente atípica.
+
+**Análisis de sensibilidad**
+
+```{r, warning=FALSE, message=FALSE}
+puntos_influyentes = which(
+  cooks.distance(modelo_transporte) > 0.05
+)
+
+modelo_sensible = glm(
+  medio_transporte ~ distancia_km + edad + sexo, data = transporte[-puntos_influyentes, ],
+  family = binomial(link = "logit")
+)
+
+# Comparar OR
+exp(coef(modelo_transporte))
+exp(coef(modelo_sensible))
+
+# Comparar modelos
+summary(modelo_transporte)
+summary(modelo_sensible)
+```
+
+Al retirar las observaciones influyentes, el modelo perdió la variación en la variable respuesta, por lo que no fue posible compararlo adecuadamente con el modelo original.
+
+## d) Gráfico
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+library(ggeffects)
+library(ggplot2)
+
+efecto_transporte = ggpredict(
+  modelo_transporte,
+  terms = c("distancia_km [all]", "sexo")
+)
+
+plot(efecto_transporte) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  labs(
+    title = "Probabilidad predicha de utilizar vehículo particular",
+    x = "Distancia a la universidad (km)",
+    y = "Probabilidad de utilizar vehículo particular (%)",
+    color = "Sexo",
+    fill = "Sexo"
+  ) +
+  theme_classic()
+```
+
+La probabilidad de usar vehículo particular disminuye ligeramente a medida que aumenta la distancia. Los hombres presentan probabilidades mayores que las mujeres, aunque los intervalos de confianza son amplios y se superponen.
+
+## e) Conclusión
+
+No se encontró evidencia estadísticamente significativa de que la distancia a la universidad, la edad o el sexo estén relacionados con la probabilidad de utilizar vehículo particular como medio principal de transporte ($p > 0.05$ en todos los casos). Por lo tanto, no se rechaza la hipótesis nula.
+
+Aunque el modelo predice una ligera disminución en la probabilidad de utilizar vehículo particular al aumentar la distancia y una mayor probabilidad para los hombres que para las mujeres, estas diferencias no fueron estadísticamente significativas. Además, los diagnósticos identificaron observaciones influyentes, especialmente la observación 25, y el análisis de sensibilidad mostró que el modelo no es estable al retirar estos casos.
+
+# Sección 2 - Fisiología Humana y Tasa de Pulsaciones Cardíaca
+
+\vspace{-2em}
+\noindent\rule{\textwidth}{0.4pt}
+\vspace{-0.3em}
+
+## a) Hipótesis
+
+Se espera que el número de latidos dependa de la intensidad de la rutina realizada, la estatura y el nivel de actividad física habitual.
+
+**$H_0$:** La rutina, la estatura y la condición física no están relacionadas con el número esperado de latidos.
+
+**$H_1$:** Al menos una de estas variables está relacionada con el número esperado de latidos.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+Transformar el número de latidos para aplicar MCO no es adecuado porque la variable dejaría de conservar las propiedades originales de un conteo Poisson, como tomar valores enteros no negativos y la relación entre su media y su varianza. Por esto, es más apropiado modelar directamente los conteos mediante un GLM Poisson.
+
+## b) Modelo
+
+```{r, warning=FALSE, message=FALSE}
+library(readxl)
+
+pulsaciones = read_excel(
+  "data/datos.xlsx", sheet = "Ejercicio_2", skip = 2
+)
+
+names(pulsaciones)
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Ejercicio en variable categórica
+pulsaciones$ejercicio = as.factor(pulsaciones$ejercicio)
+
+# Modelo Poisson
+modelo_pulsaciones = glm(
+  latidos ~ tratamiento + estatura + ejercicio,
+  data = pulsaciones,
+  family = poisson(link = "log")
+)
+
+summary(modelo_pulsaciones)
+```
+
+**Modelo estimado:**
+**Modelo estimado:**
+$$
+\log(\hat{\mu}) =
+2.563
++ 0.366(\text{tratamiento1})
++ 0.551(\text{tratamiento2})
++ 0.00256(\text{estatura})
+- 0.110(\text{ejercicio1})
+- 0.127(\text{ejercicio2})
+$$
+
+## c) Supuestos
+
+**Linealidad con el log**
+
+**$H_0$:** La estatura presenta una relación lineal con el logaritmo del número esperado de latidos.
+**$H_1$:** La estatura no presenta una relación lineal con el logaritmo del número esperado de latidos.
+
+Nivel de significancia: $\alpha = 0.05$.
+
+```{r, warning=FALSE, message=FALSE}
+pulsaciones$estatura_log = pulsaciones$estatura * log(pulsaciones$estatura)
+
+modelo_linealidad_pulso = glm(
+  latidos ~ tratamiento + estatura + ejercicio + estatura_log,
+  data = pulsaciones,
+  family = poisson(link = "log")
+)
+
+summary(modelo_linealidad_pulso)
+```
+
+El término `estatura_log` no fue significativo ($p = 0.839$). Por lo tanto, no se rechaza $H_0$ y se cumple el supuesto de linealidad con el log.
+
+**Multicolinealidad**
+
+```{r, warning=FALSE, message=FALSE}
+library(car)
+
+vif(modelo_pulsaciones)
+```
+
+Los valores de VIF fueron bajos para todas las variables, por lo que no se observa multicolinealidad problemática.
+
+**Dispersión**
+
+```{r, warning=FALSE, message=FALSE}
+modelo_pulsaciones$deviance / modelo_pulsaciones$df.residual
+```
+
+La razón entre la deviance residual y sus grados de libertad fue 0.743. Al ser menor que 1, se observa subdispersión, por lo que no se cumple estrictamente el supuesto de equidispersión del modelo Poisson.
+
+**Distancia de Cook**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+cook = cooks.distance(modelo_pulsaciones)
+limite_cook = 4 / nrow(pulsaciones)
+
+plot(
+  cook, type = "h", main = "Distancia de Cook", ylab = "Distancia de Cook"
+)
+
+abline(h = limite_cook, col = "red", lty = 2)
+
+which(cook > limite_cook)
+```
+
+Las observaciones 15 y 33 superan el punto de corte de la distancia de Cook, por lo que pueden tener una influencia importante sobre el ajuste del modelo.
+
+**Leverage**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+leverage = hatvalues(modelo_pulsaciones)
+limite_leverage = 2 * length(coef(modelo_pulsaciones)) / nrow(pulsaciones)
+
+plot(
+  leverage, type = "h", main = "Valores de leverage", ylab = "Leverage"
+)
+
+abline(h = limite_leverage, col = "blue", lty = 2)
+
+which(leverage > limite_leverage)
+```
+
+La observación 28 presenta un valor de leverage superior al punto de corte, por lo que tiene valores relativamente extremos en las variables predictoras.
+
+**Residuos de deviance estandarizados**
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+residuos_dev = rstandard(
+  modelo_pulsaciones,
+  type = "deviance"
+)
+
+plot(
+  residuos_dev, main = "Residuos de deviance estandarizados", 
+  ylab = "Residuos estandarizados"
+)
+
+abline(h = c(-2, 2), col = "red", lty = 2)
+
+which(abs(residuos_dev) > 2)
+```
+
+La observación 33 presenta un residuo de deviance estandarizado menor a -2, por lo que se identifica como una observación potencialmente atípica.
+
+**Análisis de sensibilidad**
+
+```{r, warning=FALSE, message=FALSE}
+puntos_influyentes = which(
+  cooks.distance(modelo_pulsaciones) > 0.05
+)
+
+modelo_sensible = glm(
+  latidos ~ tratamiento + estatura + ejercicio, data = pulsaciones[-puntos_influyentes, ],
+  family = poisson(link = "log")
+)
+
+# Comparar efectos
+exp(coef(modelo_pulsaciones))
+exp(coef(modelo_sensible))
+
+# Comparar modelos
+summary(modelo_pulsaciones)
+summary(modelo_sensible)
+```
+
+Al retirar las observaciones influyentes, los resultados generales del modelo se mantuvieron: los tratamientos 1 y 2 continuaron siendo significativos, mientras que la estatura y el nivel de ejercicio habitual no fueron significativos.
+
+## d) Gráfico
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+efecto_pulsaciones = ggpredict(
+  modelo_pulsaciones,
+  terms = c("estatura [all]", "tratamiento")
+)
+
+plot(efecto_pulsaciones) +
+  labs(
+    title = "Número esperado de latidos",
+    x = "Estatura (cm)",
+    y = "Número esperado de latidos",
+    color = "Tratamiento",
+    fill = "Tratamiento"
+  ) +
+  theme_classic()
+```
+
+El número esperado de latidos aumenta ligeramente con la estatura en los tres tratamientos. Sin embargo, las principales diferencias se observan entre los tratamientos: el tratamiento 2 presenta el mayor número esperado de latidos, seguido del tratamiento 1 y finalmente el tratamiento 0.
+
+## e) Conclusión
+
+Los resultados muestran que el número esperado de latidos cambia principalmente según la rutina realizada. Frente al reposo, se observaron más latidos en la rutina moderada y, especialmente, en la intensa. En cambio, no se encontró evidencia de una relación significativa con la estatura ni con el nivel de actividad física habitual.
+
+El modelo presentó algunas limitaciones en sus supuestos, principalmente por la subdispersión y la presencia de observaciones atípicas o influyentes. Sin embargo, al realizar el análisis de sensibilidad, las conclusiones principales se mantuvieron. En general, los resultados apoyan la hipótesis de que la intensidad de la rutina realizada está relacionada con el número de latidos registrados.
